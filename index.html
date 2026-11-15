@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="自分だけのキャラクターを作って友達とオンライン対戦するゲームです。">
+  <meta property="og:title" content="オリジナリティバトルゲーム">
+  <meta property="og:description" content="キャラクターを作って、友達とオンライン対戦しよう！">
+  <meta property="og:type" content="website">
+  <title>オリジナリティバトルゲーム - オンライン！</title>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    :root { color-scheme: light; --ink:#263248; --blue:#3478e5; --red:#f45b69; --border:#d3dce8; --panel:#f2f6fb; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; padding:20px; color:var(--ink); font-family:system-ui,"Yu Gothic","Meiryo",sans-serif; background:linear-gradient(135deg,#6ee7b7,#3b82f6); }
+    h1,h2 { text-align:center; } h1 { color:white; text-shadow:2px 2px #e65368; } h2 { margin-top:0; }
+    .container { max-width:960px; margin:0 auto; padding:24px; background:rgba(255,255,255,.97); border-radius:20px; box-shadow:0 10px 28px #17304733; }
+    .screen { display:none; } .screen.active { display:block; } .center { text-align:center; padding:20px 0; }
+    .card { margin:14px 0; padding:16px; background:white; border:2px solid var(--border); border-radius:14px; }
+    label { display:inline-flex; flex-wrap:wrap; align-items:center; gap:6px; margin:5px 10px 5px 0; font-weight:650; }
+    input,select { max-width:100%; padding:9px; color:var(--ink); background:#f7f9fc; border:2px solid var(--border); border-radius:8px; font:inherit; }
+    input:focus,select:focus { outline:2px solid #78a9f5; border-color:var(--blue); }
+    button { margin:5px; padding:10px 18px; color:white; background:var(--red); border:0; border-radius:999px; box-shadow:0 4px #c94250; font:inherit; font-weight:700; cursor:pointer; }
+    button:hover { filter:brightness(1.08); } button:disabled { opacity:.55; cursor:not-allowed; } .blue { background:var(--blue); box-shadow:0 4px #2456aa; } .wide { width:100%; }
+    .status-line { min-height:1.5em; margin-top:12px; color:#875b00; font-weight:700; overflow-wrap:anywhere; }
+    .budget { font-weight:700; } .moves-list { margin:10px 0; } .move-editor { padding:10px; margin:8px 0; background:#f5f8fc; border-radius:10px; }
+    .move-editor input[type="text"] { min-width:140px; } .move-editor input[type="number"] { width:85px; }
+    canvas { display:block; width:120px; height:120px; margin:8px 0; background:white; border:2px dashed #9aa9bd; border-radius:8px; touch-action:none; cursor:crosshair; }
+    .arena { display:grid; grid-template-columns:1fr 1fr; gap:16px; } .player-panel { padding:14px; background:var(--panel); border:2px solid var(--border); border-radius:14px; }
+    .player-panel h3 { margin-top:0; text-align:center; overflow-wrap:anywhere; } .hp-track { height:20px; margin:8px 0; overflow:hidden; background:#dce4ee; border-radius:99px; }
+    .hp-fill { height:100%; background:#35b86b; transition:width .25s; } .opp-fill { background:#f45b69; } .character-image { width:90px; height:90px; object-fit:cover; background:white; border-radius:10px; }
+    .badges { min-height:24px; } .badge { display:inline-block; margin:3px; padding:3px 8px; color:white; background:#dc8a2c; border-radius:20px; font-size:12px; }
+    #battle-log { height:180px; margin-top:14px; padding:12px; overflow-y:auto; color:#8df0a7; background:#17212d; border:3px solid #435267; border-radius:10px; font:14px/1.5 ui-monospace,monospace; }
+    #battle-log div { overflow-wrap:anywhere; } .muted { color:#66758a; font-size:.92em; }
+    @media (max-width:650px) { body { padding:10px; } .container { padding:14px; } .arena { grid-template-columns:1fr; } label { display:flex; } }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>⚔️ オリジナリティバトルゲーム ⚔️</h1>
+    <section id="lobby" class="screen active center">
+      <h2>オンライン対戦ロビー</h2><p>部屋を作って、表示されたルームIDを友達に教えてね。</p>
+      <div class="card" style="max-width:460px;margin:20px auto;text-align:left">
+        <label>名前 <input id="player-name" type="text" maxlength="24" value="プレイヤー"></label><hr>
+        <button id="create-room" class="blue wide">🏠 部屋を作る</button><p style="text-align:center"><strong>または</strong></p>
+        <label>ルームID <input id="room-id" type="text" autocomplete="off" placeholder="相手のルームID"></label><button id="join-room">🚪 部屋に入る</button>
+      </div>
+      <div id="connection-status" class="status-line" aria-live="polite"></div>
+      <p class="muted">接続にはインターネットが必要です。接続状況によっては対戦できない場合があります。</p>
+    </section>
+    <section id="setup" class="screen">
+      <h2>キャラクターを3体つくろう！</h2><p class="center">HPと攻撃予算の合計は、1体につき1500ポイントです。わざの威力合計は攻撃予算以内にしてください。</p>
+      <div id="characters"></div><div class="center"><button id="ready" class="blue">準備完了！</button></div>
+    </section>
+    <section id="waiting" class="screen center">
+      <h2>相手の準備を待っています...</h2><p>相手も「準備完了！」を押すとバトルが始まります。</p><p id="waiting-room-id"></p><div id="waiting-status" class="status-line" aria-live="polite"></div>
+    </section>
+    <section id="battle" class="screen">
+      <h2 id="turn-indicator">バトル準備中...</h2>
+      <div class="arena"><div class="player-panel"><h3 id="my-title">自分</h3><div id="my-character"></div></div><div class="player-panel"><h3 id="opponent-title">相手</h3><div id="opponent-character"></div></div></div>
+      <div class="card"><h3>アクション</h3><div id="actions"></div><div id="switches"></div></div><div id="battle-log" aria-live="polite"></div>
+    </section>
+  </main>
+  <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const screens = ["lobby", "setup", "waiting", "battle"];
+    const VALID_EFFECTS = new Set(["none", "damage", "heal", "reduce", "status"]);
+    const VALID_STATUSES = new Set(["burn", "poison", "heavy_poison", "paralyze"]);
+    let peer = null, conn = null, isHost = false, myRole = -1, myName = "プレイヤー";
+    let myChars = [], opponentSetup = null, game = null, hasSubmittedSetup = false;
+
+    function showScreen(id) { screens.forEach(name => $(name).classList.toggle("active", name === id)); }
+    function setStatus(message, target = "connection-status") { $(target).textContent = message; }
+    function send(message) {
+      if (!conn || !conn.open) { setStatus("相手との接続がありません。ページを再読み込みして再接続してください。", "waiting-status"); return false; }
+      conn.send(message); return true;
+    }
+    function connectHandlers(connection) {
+      conn = connection;
+      conn.on("data", handleMessage);
+      conn.on("close", () => { alert("相手との接続が切れました。"); location.reload(); });
+      conn.on("error", (error) => { console.error(error); setStatus("通信エラーが発生しました。", "waiting-status"); });
+    }
+    function startPeer() {
+      if (!window.Peer) { setStatus("通信ライブラリを読み込めませんでした。インターネット接続を確認してください。"); return false; }
+      return true;
+    }
+    function configurePeer() {
+      peer = new Peer();
+      peer.on("error", (error) => {
+        console.error(error); setStatus(`接続できませんでした (${error.type || "接続エラー"})。ページを再読み込みして試してください。`);
+        $("create-room").disabled = false; $("join-room").disabled = false;
+      });
+    }
+    $("create-room").addEventListener("click", () => {
+      if (!startPeer()) return;
+      myName = $("player-name").value.trim().slice(0, 24) || "プレイヤー"; isHost = true; myRole = 0;
+      $("create-room").disabled = true; $("join-room").disabled = true; setStatus("接続サーバーに接続中..."); configurePeer();
+      peer.on("open", (id) => { setStatus(`部屋を作りました。ルームID: ${id} — このIDを友達に教えてください。`); $("waiting-room-id").textContent = `ルームID: ${id}`; });
+      peer.on("connection", (connection) => {
+        if (conn) { connection.close(); return; }
+        connectHandlers(connection);
+        connection.on("open", () => { setStatus("相手が参加しました。キャラクターを作成してください。"); renderSetup(); showScreen("setup"); });
+      });
+    });
+    $("join-room").addEventListener("click", () => {
+      if (!startPeer()) return;
+      const roomId = $("room-id").value.trim();
+      if (!roomId) { alert("ルームIDを入力してください。"); return; }
+      myName = $("player-name").value.trim().slice(0, 24) || "プレイヤー"; isHost = false; myRole = 1;
+      $("create-room").disabled = true; $("join-room").disabled = true; setStatus("部屋に接続中..."); configurePeer();
+      peer.on("open", () => {
+        const connection = peer.connect(roomId); connectHandlers(connection);
+        connection.on("open", () => { setStatus("入室しました。キャラクターを作成してください。"); renderSetup(); showScreen("setup"); });
+      });
+    });
+
+    function renderSetup() {
+      const root = $("characters"); root.replaceChildren();
+      for (let i = 0; i < 3; i++) {
+        const card = document.createElement("article"); card.className = "card";
+        card.innerHTML = `
+          <h3>キャラクター ${i + 1}</h3>
+          <label>名前 <input data-field="name" maxlength="24" value="マイキャラ${i + 1}"></label><br>
+          <label>HP <input data-field="hp" type="number" min="100" max="1400" value="1000"></label>
+          <label>攻撃予算 <input data-field="attack" type="number" min="100" max="1400" value="500"></label>
+          <div class="budget">合計: <span data-budget>1500</span> / 1500</div>
+          <label>画像URL（省略可・httpsのみ）<input data-field="imageUrl" type="url" placeholder="https://..."></label>
+          <span class="muted">またはキャンバスに絵を描けます</span><canvas width="120" height="120" aria-label="キャラクターのお絵描きキャンバス"></canvas>
+          <button type="button" data-clear>キャンバスを消す</button><h4>わざ（特殊効果は最初の3つまで）</h4>
+          <div class="moves-list"></div><button type="button" data-add>➕ わざを追加</button>`;
+        root.appendChild(card); addMove(card.querySelector(".moves-list")); addMove(card.querySelector(".moves-list")); setupCanvas(card.querySelector("canvas"));
+      }
+      root.onclick = setupClickHandler; root.oninput = updateBudgets;
+    }
+    function setupClickHandler(event) {
+      const card = event.target.closest(".card"); if (!card) return;
+      if (event.target.matches("[data-add]")) addMove(card.querySelector(".moves-list"));
+      else if (event.target.matches("[data-clear]")) { const canvas = card.querySelector("canvas"), ctx = canvas.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    }
+    function updateBudgets(event) {
+      if (!event.target.matches('[data-field="hp"], [data-field="attack"]')) return;
+      const card = event.target.closest(".card"), hp = Number(card.querySelector('[data-field="hp"]').value) || 0;
+      const attack = Number(card.querySelector('[data-field="attack"]').value) || 0, total = hp + attack, display = card.querySelector("[data-budget]");
+      display.textContent = String(total); display.style.color = total === 1500 ? "#16833b" : "#c62828";
+    }
+    function addMove(list) {
+      if (list.children.length >= 6) { alert("わざは1体につき最大6つです。"); return; }
+      const index = list.children.length, editor = document.createElement("div"); editor.className = "move-editor";
+      editor.innerHTML = `
+        <label>わざ名 <input data-move="name" maxlength="24" value="わざ${index + 1}"></label>
+        <label>威力 <input data-move="power" type="number" min="0" max="500" value="50"></label>
+        ${index < 3 ? `<br><label>発動確率(%) <input data-move="prob" type="number" min="0" max="100" value="30"></label>
+          <label>効果 <select data-move="effect"><option value="none">なし</option><option value="damage">追加ダメージ</option><option value="heal">回復</option><option value="reduce">ダメージ軽減</option><option value="status">状態異常</option></select></label>
+          <label>効果量 <input data-move="amount" type="number" min="0" max="100" value="20"></label>
+          <label>対象 <select data-move="target"><option value="opponent">相手</option><option value="self">自分</option></select></label>
+          <label>状態異常 <select data-move="status"><option value="burn">炎上</option><option value="poison">毒</option><option value="heavy_poison">猛毒</option><option value="paralyze">麻痺</option></select></label>` : `<p class="muted">4つ目以降のわざには特殊効果がありません。</p>`}`;
+      list.appendChild(editor);
+    }
+    function setupCanvas(canvas) {
+      const ctx = canvas.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height); let drawing = false;
+      const draw = (event) => { if (!drawing) return; const rect = canvas.getBoundingClientRect(); const x = (event.clientX - rect.left) * canvas.width / rect.width, y = (event.clientY - rect.top) * canvas.height / rect.height; ctx.fillStyle = "#f45b69"; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); };
+      canvas.addEventListener("pointerdown", (event) => { drawing = true; canvas.setPointerCapture(event.pointerId); draw(event); });
+      canvas.addEventListener("pointermove", draw); canvas.addEventListener("pointerup", () => { drawing = false; }); canvas.addEventListener("pointercancel", () => { drawing = false; });
+    }
+    function readSetup() {
+      const result = [], cards = [...$("characters").querySelectorAll(".card")];
+      for (const [index, card] of cards.entries()) {
+        const name = card.querySelector('[data-field="name"]').value.trim().slice(0, 24) || `キャラ${index + 1}`;
+        const hp = Number(card.querySelector('[data-field="hp"]').value), attack = Number(card.querySelector('[data-field="attack"]').value);
+        if (!Number.isInteger(hp) || !Number.isInteger(attack) || hp < 100 || hp > 1400 || attack < 100 || attack > 1400 || hp + attack !== 1500) { alert(`キャラクター${index + 1}のHPと攻撃予算の合計を1500にしてください。`); return null; }
+        const moves = [...card.querySelectorAll(".move-editor")].map((editor, moveIndex) => {
+          const field = (key) => editor.querySelector(`[data-move="${key}"]`), power = Number(field("power").value);
+          const prob = Number(field("prob")?.value ?? 0), amount = Number(field("amount")?.value ?? 0);
+          if (!Number.isInteger(power) || power < 0 || power > 500 || !Number.isFinite(prob) || prob < 0 || prob > 100 || !Number.isFinite(amount) || amount < 0 || amount > 100) throw new Error(`キャラクター${index + 1}のわざ設定を確認してください。`);
+          return { name: field("name").value.trim().slice(0, 24) || `わざ${moveIndex + 1}`, power, effect: field("effect")?.value || "none", prob, amount, target: field("target")?.value || "opponent", status: field("status")?.value || "poison" };
+        });
+        if (!moves.length || moves.reduce((sum, move) => sum + move.power, 0) > attack) { alert(`キャラクター「${name}」のわざ威力合計が攻撃予算を超えているか、わざがありません。`); return null; }
+        const urlInput = card.querySelector('[data-field="imageUrl"]').value.trim(); let image = card.querySelector("canvas").toDataURL("image/png");
+        if (urlInput) { try { const url = new URL(urlInput); if (url.protocol !== "https:") throw new Error(); image = url.href; } catch { alert(`キャラクター「${name}」の画像URLはhttps://から始まるURLを入力してください。`); return null; } }
+        result.push({ name, maxHp:hp, hp, attack, moves, image, statuses:[], reduceRate:0, reduceTurns:0 });
+      }
+      return result;
+    }
+    $("ready").addEventListener("click", () => {
+      if (hasSubmittedSetup) return;
+      if (!conn || !conn.open) { alert("相手との接続ができていません。"); return; }
+      let chars; try { chars = readSetup(); } catch (error) { alert(error.message); return; }
+      if (!chars) return;
+      myChars = chars; hasSubmittedSetup = true; $("ready").disabled = true; showScreen("waiting");
+      setStatus("準備完了。相手の準備を待っています...", "waiting-status"); send({ type:"SETUP", player:{ name:myName, chars:myChars } });
+    });
+
+    // Peerから届く編成は信用せず、ゲーム状態に取り込む前に全項目を検証・正規化する。
+    function validateSetup(player) {
+      if (!player || typeof player !== "object" || !Array.isArray(player.chars) || player.chars.length !== 3) return null;
+      const name = typeof player.name === "string" ? player.name.trim().slice(0, 24) || "相手" : "相手";
+      const chars = [];
+      for (const raw of player.chars) {
+        if (!raw || typeof raw !== "object" || typeof raw.name !== "string") return null;
+        const hp = raw.hp, maxHp = raw.maxHp, attack = raw.attack;
+        if (!Number.isInteger(hp) || !Number.isInteger(maxHp) || hp !== maxHp || hp < 100 || hp > 1400 || !Number.isInteger(attack) || attack < 100 || attack > 1400 || hp + attack !== 1500) return null;
+        if (!Array.isArray(raw.moves) || raw.moves.length < 1 || raw.moves.length > 6) return null;
+        let totalPower = 0;
+        const moves = [];
+        for (const move of raw.moves) {
+          if (!move || typeof move !== "object" || !Number.isInteger(move.power) || move.power < 0 || move.power > 500 || typeof move.name !== "string") return null;
+          const effect = move.effect;
+          const prob = move.prob, amount = move.amount;
+          if (!VALID_EFFECTS.has(effect) || !Number.isFinite(prob) || prob < 0 || prob > 100 || !Number.isFinite(amount) || amount < 0 || amount > 100 || !["self", "opponent"].includes(move.target) || !VALID_STATUSES.has(move.status)) return null;
+          totalPower += move.power;
+          moves.push({ name:move.name.trim().slice(0, 24) || "わざ", power:move.power, effect, prob, amount, target:move.target, status:move.status });
+        }
+        if (totalPower > attack) return null;
+        const image = typeof raw.image === "string" && (raw.image.startsWith("data:image/png;base64,") && raw.image.length < 100000 || safeImage(raw.image)) ? raw.image : "";
+        chars.push({ name:raw.name.trim().slice(0, 24) || "キャラ", maxHp, hp, attack, moves, image, statuses:[], reduceRate:0, reduceTurns:0 });
+      }
+      return { name, chars };
+    }
+    function handleMessage(message) {
+      if (!message || typeof message !== "object") return;
+      if (message.type === "SETUP") {
+        if (!isHost || opponentSetup || game) return;
+        const validated = validateSetup(message.player);
+        if (!validated) { send({ type:"ERROR", message:"相手のキャラクター設定が正しくありません。設定を見直して再接続してください。" }); return; }
+        opponentSetup = validated; maybeStartGame();
+      } else if (message.type === "STATE") {
+        if (isHost || !message.game) return;
+        game = message.game; renderBattle();
+      } else if (message.type === "ACTION" && isHost) {
+        processAction(1, message.action);
+      } else if (message.type === "ERROR" && typeof message.message === "string") {
+        setStatus(message.message, "waiting-status");
+      }
+    }
+    function maybeStartGame() {
+      if (!isHost || !opponentSetup || !myChars.length || game) return;
+      const players = [{ name:myName, chars:myChars, active:0 }, { name:opponentSetup.name, chars:opponentSetup.chars, active:0 }];
+      game = { players, turn:Math.random() < 0.5 ? 0 : 1, phase:"battle", winner:null, log:["バトルスタート！"], turnToken:0 };
+      sendState(); renderBattle();
+    }
+    function sendState() { if (isHost) send({ type:"STATE", game }); }
+
+    // 倒されたキャラクターが出たままにならないよう、最初の生存キャラクターへ自動交代する。
+    function ensureLivingActive(player) {
+      const current = player.chars[player.active];
+      if (current && current.hp > 0) return;
+      const next = player.chars.findIndex(character => character.hp > 0);
+      if (next !== -1) { player.active = next; addLog(`${player.name} は ${player.chars[next].name} を繰り出した！`); }
+    }
+    function processAction(playerIndex, action) {
+      if (!game || game.phase !== "battle" || playerIndex !== game.turn || !action || typeof action !== "object") return;
+      const player = game.players[playerIndex], opponent = game.players[1 - playerIndex];
+      ensureLivingActive(player);
+      const actor = player.chars[player.active];
+      if (!actor || actor.hp <= 0) return;
+      if (action.type === "switch") {
+        const next = Number(action.index);
+        if (!Number.isInteger(next) || next < 0 || next >= player.chars.length || next === player.active || player.chars[next].hp <= 0) return;
+        const previous = actor.name; player.active = next; addLog(`${player.name} は ${previous} から ${player.chars[next].name} に交代！`);
+      } else if (action.type === "move") {
+        const moveIndex = Number(action.index), move = actor.moves[moveIndex];
+        if (!Number.isInteger(moveIndex) || !move) return;
+        if (actor.statuses.some(status => status.type === "paralyze") && Math.random() < 0.5) addLog(`${actor.name} はしびれて動けなかった！`);
+        else {
+          const target = opponent.chars[opponent.active];
+          addLog(`${player.name} の ${actor.name} は「${move.name}」をつかった！`);
+          const damage = Math.max(0, Math.floor(move.power * (1 - target.reduceRate)));
+          target.hp = Math.max(0, target.hp - damage); addLog(`${target.name} に ${damage} のダメージ！`);
+          if (move.effect !== "none" && Math.random() * 100 < move.prob) applyMoveEffect(player, opponent, actor, target, move);
+        }
+      } else return;
+
+      // 攻撃・追加効果でHPが0になった場合、勝敗判定の前に交代する。
+      ensureLivingActive(player); ensureLivingActive(opponent);
+      if (checkWinner()) { game.phase = "end"; sendState(); renderBattle(); return; }
+
+      // 状態異常と軽減のターン数は、そのターン開始時に行動したキャラクターに適用する。
+      tickStatuses(actor);
+      if (actor.reduceTurns > 0) { actor.reduceTurns--; if (actor.reduceTurns === 0) actor.reduceRate = 0; }
+      ensureLivingActive(player); ensureLivingActive(opponent);
+      if (checkWinner()) { game.phase = "end"; sendState(); renderBattle(); return; }
+      game.turn = 1 - game.turn; game.turnToken++; addLog("— ターン交代 —"); sendState(); renderBattle();
+    }
+    function applyMoveEffect(player, opponent, self, enemy, move) {
+      const target = move.target === "self" ? self : enemy, amount = Number(move.amount) || 0;
+      switch (move.effect) {
+        case "damage": target.hp = Math.max(0, target.hp - amount); addLog(`追加ダメージ！ ${target.name} に ${amount} ダメージ。`); break;
+        case "heal": target.hp = Math.min(target.maxHp, target.hp + amount); addLog(`${target.name} のHPが ${amount} 回復！`); break;
+        case "reduce": target.reduceRate = Math.min(0.9, amount / 100); target.reduceTurns = 3; addLog(`${target.name} は3ターン、受けるダメージが軽減される！`); break;
+        case "status":
+          if (!target.statuses.some(status => status.type === move.status)) { target.statuses.push({ type:move.status, turns:3 }); addLog(`${target.name} は${statusName(move.status)}になった！`); }
+          else addLog(`${target.name} はすでに${statusName(move.status)}だ。`);
+          break;
+      }
+    }
+    function tickStatuses(character) {
+      for (const status of character.statuses) {
+        if (status.type !== "paralyze") { const damage = status.type === "heavy_poison" ? 10 : 5; character.hp = Math.max(0, character.hp - damage); addLog(`${character.name} は${statusName(status.type)}で ${damage} ダメージ。`); }
+        status.turns--;
+      }
+      character.statuses = character.statuses.filter(status => status.turns > 0);
+    }
+    function checkWinner() {
+      const defeated = game.players.map(player => player.chars.every(character => character.hp <= 0));
+      if (defeated[0] && defeated[1]) { game.winner = null; addLog("両チームが全滅しました。引き分け！"); return true; }
+      if (defeated[0] || defeated[1]) { game.winner = defeated[0] ? 1 : 0; addLog(`${game.players[game.winner].name} の勝ち！`); return true; }
+      return false;
+    }
+    function addLog(message) { game.log.push(message); if (game.log.length > 100) game.log.shift(); }
+    function statusName(type) { return ({ burn:"炎上", poison:"毒", heavy_poison:"猛毒", paralyze:"麻痺" })[type] || type; }
+    function renderBattle() {
+      if (!game || !Array.isArray(game.players) || game.players.length !== 2) return;
+      showScreen("battle"); const mine = game.players[myRole], theirs = game.players[1 - myRole];
+      $("my-title").textContent = `${mine.name}（あなた）`; $("opponent-title").textContent = `${theirs.name}（相手）`;
+      renderCharacter($("my-character"), mine.chars[mine.active], false); renderCharacter($("opponent-character"), theirs.chars[theirs.active], true);
+      const indicator = $("turn-indicator");
+      indicator.textContent = game.phase === "end" ? (game.winner === null ? "引き分け！" : `${game.players[game.winner].name} の勝ち！`) : (game.turn === myRole ? "🌟 あなたの番です" : "⏳ 相手の番です...");
+      renderActions(mine); const log = $("battle-log"); log.replaceChildren();
+      for (const line of game.log) { const row = document.createElement("div"); row.textContent = line; log.appendChild(row); }
+      log.scrollTop = log.scrollHeight;
+    }
+    function renderCharacter(container, character, isOpponent) {
+      container.replaceChildren(); const title = document.createElement("strong"); title.textContent = `${character.name}（HP: ${character.hp}/${character.maxHp}）`; container.appendChild(title);
+      const track = document.createElement("div"); track.className = "hp-track"; const fill = document.createElement("div"); fill.className = `hp-fill${isOpponent ? " opp-fill" : ""}`;
+      fill.style.width = `${Math.max(0, Math.min(100, character.hp / character.maxHp * 100))}%`; track.appendChild(fill); container.appendChild(track);
+      if (safeImage(character.image)) { const image = document.createElement("img"); image.className = "character-image"; image.alt = `${character.name}の画像`; image.src = character.image; container.appendChild(image); }
+      const badges = document.createElement("div"); badges.className = "badges"; badges.textContent = character.statuses.length ? character.statuses.map(status => `${statusName(status.type)}(${status.turns})`).join(" ") : "状態異常なし"; container.appendChild(badges);
+    }
+    function safeImage(value) { return typeof value === "string" && (value.startsWith("data:image/png;base64,") || /^https:\/\/[^ ]+$/i.test(value)); }
+    function renderActions(mine) {
+      const actions = $("actions"), switches = $("switches"); actions.replaceChildren(); switches.replaceChildren();
+      if (game.phase === "end" || game.turn !== myRole) { actions.textContent = game.phase === "end" ? "バトル終了" : "相手が考えています..."; return; }
+      const character = mine.chars[mine.active];
+      if (!character || character.hp <= 0) { actions.textContent = "生存キャラクターがいません。"; return; }
+      const moveTitle = document.createElement("p"); moveTitle.textContent = "わざを選んでください:"; actions.appendChild(moveTitle);
+      character.moves.forEach((move, index) => { const button = document.createElement("button"); button.textContent = `${move.name}（威力 ${move.power}）`; button.addEventListener("click", () => submitAction({ type:"move", index })); actions.appendChild(button); });
+      const switchTitle = document.createElement("p"); switchTitle.textContent = "キャラクター交代:"; switches.appendChild(switchTitle);
+      mine.chars.forEach((candidate, index) => { if (index === mine.active || candidate.hp <= 0) return; const button = document.createElement("button"); button.className = "blue"; button.textContent = `${candidate.name} に交代`; button.addEventListener("click", () => submitAction({ type:"switch", index })); switches.appendChild(button); });
+    }
+    function submitAction(action) {
+      if (!game || game.turn !== myRole || game.phase !== "battle") return;
+      if (isHost) processAction(myRole, action); else send({ type:"ACTION", action });
+    }
+  </script>
+</body>
+</html>
